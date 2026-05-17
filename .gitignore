@@ -1,0 +1,13 @@
+build/
+*.o
+*.d
+*.lst
+*.map
+*.elf
+*.bin
+*.hex
+.cproject
+.project
+.settings/
+.mxproject
+EWARM/
