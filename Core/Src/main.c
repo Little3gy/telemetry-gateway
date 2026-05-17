@@ -23,6 +23,8 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#include "SX1278.h"
+#include "SX1278_hw.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,6 +51,8 @@ UART_HandleTypeDef huart3;
 /* USER CODE BEGIN PV */
 uint8_t tx_buffer[64];
 uint8_t rx_buffer[64];
+SX1278_hw_t SX1278_hw;
+SX1278_t SX1278;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -100,6 +104,28 @@ int main(void)
   MX_USART3_UART_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
+  
+  /* Initialize LoRa hardware pins */
+  SX1278_hw.reset.pin = RESET_Pin; 
+  SX1278_hw.reset.port = RESET_GPIO_Port;
+  SX1278_hw.dio0.pin = DIO0_Pin;
+  SX1278_hw.dio0.port = DIO0_GPIO_Port;
+  SX1278_hw.nss.pin = NSS_Pin;
+  SX1278_hw.nss.port = NSS_GPIO_Port;
+  SX1278_hw.spi = &hspi1;
+
+  /* Initialize LoRa module */
+  if (SX1278_Init(&SX1278, &SX1278_hw) != SX1278_OK) {
+    // Initialization failed, handle error
+    const char *error_msg = "LoRa Init Failed\r\n";
+    HAL_UART_Transmit(&huart2, (uint8_t*)error_msg, strlen(error_msg), 100);
+    while (1);
+  }
+
+  /* Set MEMS CS high */
+  HAL_GPIO_WritePin(MEMS_GPIO_Port, MEMS_Pin, GPIO_PIN_SET);
+
+
 
   /* USER CODE END 2 */
 
@@ -119,6 +145,14 @@ int main(void)
 
     // one second delay before starting main loop
     HAL_Delay(1000);
+
+
+    /* Transmit over LoRa */
+    if (SX1278_Transmit(&SX1278, tx_buffer, strlen((char*)tx_buffer)) != SX1278_OK) {
+      // Transmission failed, handle error
+      const char *error_msg = "LoRa Transmit Failed\r\n";
+      HAL_UART_Transmit(&huart2, (uint8_t*)error_msg, strlen(error_msg), 100);
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
