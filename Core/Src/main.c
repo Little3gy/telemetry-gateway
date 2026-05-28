@@ -48,9 +48,22 @@ SPI_HandleTypeDef hspi1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
+
+// wifi states
+typedef enum {
+    STATE_WIFI_OK,
+    STATE_WIFI_WEAK,
+    LORA_ACTIVE
+  } wifi_state_t;
+
+  wifi_state_t wifi_state = STATE_WIFI_OK;
+
+
 /* USER CODE BEGIN PV */
 uint8_t tx_buffer[64];
 uint8_t rx_buffer[64];
+
+/* LoRa module */
 SX1278_hw_t SX1278_hw;
 SX1278_t SX1278;
 /* USER CODE END PV */
@@ -60,6 +73,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART3_UART_Init(void);
+
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -105,23 +119,27 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   
-  /* Initialize LoRa hardware pins */
-  SX1278_hw.reset.pin = RESET_Pin; 
-  SX1278_hw.reset.port = RESET_GPIO_Port;
-  SX1278_hw.dio0.pin = DIO0_Pin;
-  SX1278_hw.dio0.port = DIO0_GPIO_Port;
-  SX1278_hw.nss.pin = NSS_Pin;
-  SX1278_hw.nss.port = NSS_GPIO_Port;
-  SX1278_hw.spi = &hspi1;
+/* Initialize LoRa hardware pins */
+SX1278_hw.nss.port = NSS_GPIO_Port;
+SX1278_hw.nss.pin = NSS_Pin;
+SX1278_hw.reset.port = RESET_GPIO_Port;
+SX1278_hw.reset.pin = RESET_Pin;
+SX1278_hw.dio0.port = DIO0_GPIO_Port;
+SX1278_hw.dio0.pin = DIO0_Pin;
+SX1278_hw.spi = &hspi1;
 
-  /* Initialize LoRa module */
-  if (SX1278_Init(&SX1278, &SX1278_hw) != SX1278_OK) {
-    // Initialization failed, handle error
-    const char *error_msg = "LoRa Init Failed\r\n";
-    HAL_UART_Transmit(&huart2, (uint8_t*)error_msg, strlen(error_msg), 100);
-    while (1);
-  }
+/* Initialize LoRa module */
+SX1278.hw = &SX1278_hw;
+SX1278_init(&SX1278, 433000000, SX1278_POWER_11DBM,
+            SX1278_LORA_SF_7, SX1278_LORA_BW_125KHZ,
+            SX1278_LORA_CR_4_5, SX1278_LORA_CRC_EN, 10);
 
+HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa Init Done\r\n", 16, 100);
+
+uint8_t version = SX1278_SPIRead(&SX1278, 0x42);
+char debug[40];
+snprintf(debug, sizeof(debug), "SX1278 version: 0x%02X\r\n", version);
+HAL_UART_Transmit(&huart2, (uint8_t*)debug, strlen(debug), 100);
   /* Set MEMS CS high */
   HAL_GPIO_WritePin(MEMS_GPIO_Port, MEMS_Pin, GPIO_PIN_SET);
 
@@ -143,16 +161,19 @@ int main(void)
     /* Echo to debug monitor via USART3 */
     HAL_UART_Transmit(&huart3, tx_buffer, strlen((char*)tx_buffer), 100);
 
-    // one second delay before starting main loop
+   
+
+/* Transmit over LoRa */
+int lora_result = SX1278_transmit(&SX1278, tx_buffer,
+                  strlen((char*)tx_buffer), 2000);
+if (lora_result > 0) {
+    HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa TX OK\r\n", 12, 100);
+} else {
+    HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa TX FAIL\r\n", 14, 100);
+}
+// one second delay before starting main loop
     HAL_Delay(1000);
-
-
-    /* Transmit over LoRa */
-    if (SX1278_Transmit(&SX1278, tx_buffer, strlen((char*)tx_buffer)) != SX1278_OK) {
-      // Transmission failed, handle error
-      const char *error_msg = "LoRa Transmit Failed\r\n";
-      HAL_UART_Transmit(&huart2, (uint8_t*)error_msg, strlen(error_msg), 100);
-    }
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -229,7 +250,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler  = SPI_BAUDRATEPRESCALER_16;;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;

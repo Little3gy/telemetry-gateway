@@ -182,6 +182,12 @@ DEPTH:<value>,HDG:<value>,BAT:<value>,TEMP:<value>\r\n
 | 5 | SD card black box logger (FatFS) | ⬜ Pending |
 
 ---
+## Current 
+
+LoRa driver integrated and building clean
+Hardware wired up
+Next step: set up ESP32 as LoRa receiver, then verify end-to-end LoRa transmission
+---
 
 ## Author
 
