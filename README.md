@@ -176,7 +176,7 @@ DEPTH:<value>,HDG:<value>,BAT:<value>,TEMP:<value>\r\n
 |---|---|---|
 | 0 | Environment validation (LED blink) | ✅ Done |
 | 1 | UART pass-through + ESP32 Wi-Fi UDP | ✅ Done |
-| 2 | SX1278 LoRa SPI driver integration | 🔄 In progress |
+| 2 | SX1278 LoRa SPI driver integration |  ✅ Done |
 | 3 | FreeRTOS task architecture | ⬜ Pending |
 | 4 | Communication Manager state machine + QoS | ⬜ Pending |
 | 5 | SD card black box logger (FatFS) | ⬜ Pending |
