@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,17 +49,7 @@ SPI_HandleTypeDef hspi1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
-
-// wifi states
-typedef enum {
-    STATE_WIFI_OK,
-    STATE_WIFI_WEAK,
-    LORA_ACTIVE
-  } wifi_state_t;
-
-  wifi_state_t wifi_state = STATE_WIFI_OK;
-
-
+osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
 uint8_t tx_buffer[64];
 uint8_t rx_buffer[64];
@@ -66,6 +57,9 @@ uint8_t rx_buffer[64];
 /* LoRa module */
 SX1278_hw_t SX1278_hw;
 SX1278_t SX1278;
+
+
+QueueHandle_t telemetryQueue;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -73,9 +67,13 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART3_UART_Init(void);
-
 static void MX_SPI1_Init(void);
+void StartDefaultTask(void const * argument);
+
 /* USER CODE BEGIN PFP */
+void vUARTTask(void *pvParameters);
+
+void vTelemetryTask(void *pvParameters);
 
 /* USER CODE END PFP */
 
@@ -134,7 +132,7 @@ SX1278_init(&SX1278, 433000000, SX1278_POWER_11DBM,
             SX1278_LORA_SF_7, SX1278_LORA_BW_125KHZ,
             SX1278_LORA_CR_4_5, SX1278_LORA_CRC_EN, 10);
 
-HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa Init Done\r\n", 16, 100);
+HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa Init Done\r\n", 16, 100);  
 
 uint8_t version = SX1278_SPIRead(&SX1278, 0x42);
 char debug[40];
@@ -143,36 +141,58 @@ HAL_UART_Transmit(&huart2, (uint8_t*)debug, strlen(debug), 100);
   /* Set MEMS CS high */
   HAL_GPIO_WritePin(MEMS_GPIO_Port, MEMS_Pin, GPIO_PIN_SET);
 
+HAL_UART_Transmit(&huart2, (uint8_t*)"After LoRa init\r\n", 17, 100);
+
+
+  // create UART and telemetry tasks
+xTaskCreate(vUARTTask, "UART Task", 1024, NULL, 3, NULL);
+xTaskCreate(vTelemetryTask, "Telemetry Task", 1024, NULL, 2, NULL);
+HAL_UART_Transmit(&huart2, (uint8_t*)"Tasks created\r\n", 15, 100);
+
 
 
   /* USER CODE END 2 */
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* definition and creation of defaultTask */
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
+  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+
+  // create telemetry queue - holds up to 10 telemetry messages, each up to 64 bytes
+  telemetryQueue = xQueueCreate(10, sizeof(tx_buffer));
+
+  /* USER CODE END RTOS_THREADS */
+
+  HAL_UART_Transmit(&huart2, (uint8_t*)"Starting scheduler\r\n", 20, 100);
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
 
-    /* Generate fake telemetry */
-    snprintf((char*)tx_buffer, sizeof(tx_buffer), "DEPTH:12.5,HDG:270,BAT:11.8,TEMP:35.2\r\n");
-    
-    /* Send to ESP32 via USART2 */
-    HAL_UART_Transmit(&huart2, tx_buffer, strlen((char*)tx_buffer), 100);
-
-    /* Echo to debug monitor via USART3 */
-    HAL_UART_Transmit(&huart3, tx_buffer, strlen((char*)tx_buffer), 100);
-
-   
-
-/* Transmit over LoRa */
-int lora_result = SX1278_transmit(&SX1278, tx_buffer,
-                  strlen((char*)tx_buffer), 2000);
-if (lora_result > 0) {
-    HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa TX OK\r\n", 12, 100);
-} else {
-    HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa TX FAIL\r\n", 14, 100);
-}
-// one second delay before starting main loop
-    HAL_Delay(1000);
     
     /* USER CODE END WHILE */
 
@@ -250,7 +270,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler  = SPI_BAUDRATEPRESCALER_16;;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -382,8 +402,86 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void vUARTTask(void *pvParameters) {
+    uint8_t rx_buffer[64]; 
+    while (1) {
+        // Check for incoming data on USART3 with short timeout to not block
+        if (HAL_UART_Receive(&huart3, rx_buffer, sizeof(rx_buffer), 10) == HAL_OK) {
+            // Process received data (e.g., print to debug monitor)
+            xQueueSend(telemetryQueue, rx_buffer, 0); // Send to telemetry queue
+        }
+        // Yield to other tasks
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+
+void vTelemetryTask(void *pvParameters) {
+    for (;;) {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Task started\r\n", 14, 100);
+        snprintf((char*)tx_buffer, sizeof(tx_buffer), "DEPTH:12.5,HDG:270,BAT:11.8,TEMP:35.2\r\n");
+        
+        /* Send to ESP32 via USART2 */
+        HAL_UART_Transmit(&huart2, tx_buffer, strlen((char*)tx_buffer), 100);
+
+        /* Echo to debug monitor via USART3 */
+        HAL_UART_Transmit(&huart3, tx_buffer, strlen((char*)tx_buffer), 100);
+
+        /* Transmit over LoRa (reduced timeout to avoid blocking scheduler) */
+        int lora_result = SX1278_transmit(&SX1278, tx_buffer,
+                          strlen((char*)tx_buffer), 500);
+        if (lora_result > 0) {
+            HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa TX OK\r\n", 12, 100);
+        } else {
+            HAL_UART_Transmit(&huart2, (uint8_t*)"LoRa TX FAIL\r\n", 14, 100);
+        }
+        /* Wait 1 second before next telemetry cycle */
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM1 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM1)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
